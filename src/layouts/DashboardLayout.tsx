@@ -6,6 +6,10 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+const topLinkBase = "text-sm font-semibold transition-colors hover:text-white";
+const topLinkIdle = "text-white/70";
+const topLinkActive = "text-white";
+
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
 
@@ -14,16 +18,41 @@ export default function DashboardLayout() {
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4">
         {/* Top bar */}
         <header className="flex items-center justify-between py-6">
+          {/* Left: brand */}
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white/10 text-sm font-extrabold text-white ring-1 ring-white/15">
               R
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold text-white">RIDHAH PH</div>
-              <div className="text-xs text-white/60">Risk Intake & Decision Support</div>
+              <div className="text-xs text-white/60">Risk Index for Heritage & Ancestral Houses</div>
             </div>
           </div>
 
+          {/* Middle: top nav (desktop) */}
+          <nav className="mx-auto hidden items-center gap-6 md:flex">
+            <NavLink
+              to="/app/questionnaire"
+              end
+              className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+            >
+              Home
+            </NavLink>
+            <NavLink
+              to="/about"
+              className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+            >
+              About Us
+            </NavLink>
+            <NavLink
+              to="/contact"
+              className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+            >
+              Contact Us
+            </NavLink>
+          </nav>
+
+          {/* Right: user */}
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
               <div className="text-sm font-semibold text-white">{user?.displayName ?? "User"}</div>
@@ -33,11 +62,35 @@ export default function DashboardLayout() {
             <button
               className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
               onClick={logout}
+              type="button"
             >
               Logout
             </button>
           </div>
         </header>
+
+        {/* Mobile top nav */}
+        <div className="mb-4 flex items-center justify-center gap-6 md:hidden">
+          <NavLink
+            to="/app/summary"
+            end
+            className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+          >
+            Home
+          </NavLink>
+          <NavLink
+            to="/about"
+            className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+          >
+            About
+          </NavLink>
+          <NavLink
+            to="/contact"
+            className={({ isActive }) => cx(topLinkBase, isActive ? topLinkActive : topLinkIdle)}
+          >
+            Contact
+          </NavLink>
+        </div>
 
         {/* Content */}
         <div className="flex flex-1 gap-6 pb-10">
@@ -51,7 +104,9 @@ export default function DashboardLayout() {
                 className={({ isActive }) =>
                   cx(
                     "block rounded-2xl px-4 py-3 text-sm font-semibold transition",
-                    isActive ? "bg-indigo-500/20 text-white ring-1 ring-indigo-400/30" : "text-white/75 hover:bg-white/5"
+                    isActive
+                      ? "bg-indigo-500/20 text-white ring-1 ring-indigo-400/30"
+                      : "text-white/75 hover:bg-white/5"
                   )
                 }
               >
@@ -63,7 +118,9 @@ export default function DashboardLayout() {
                 className={({ isActive }) =>
                   cx(
                     "block rounded-2xl px-4 py-3 text-sm font-semibold transition",
-                    isActive ? "bg-indigo-500/20 text-white ring-1 ring-indigo-400/30" : "text-white/75 hover:bg-white/5"
+                    isActive
+                      ? "bg-indigo-500/20 text-white ring-1 ring-indigo-400/30"
+                      : "text-white/75 hover:bg-white/5"
                   )
                 }
               >
