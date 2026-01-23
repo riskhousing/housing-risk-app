@@ -1,7 +1,3 @@
-// src/pages/SummaryPage.tsx
-// FIX: remove orderBy(createdAt) so Firestore does NOT require a composite index.
-// We still fetch only the current user's docs, then sort client-side by createdAt desc.
-
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -19,8 +15,6 @@ type Row = {
   meta?: {
     buildingName?: string;
     buildingUniqueCode?: string;
-    coordinatesLat?: number | null;
-    coordinatesLng?: number | null;
     [k: string]: any;
   };
 
@@ -35,10 +29,9 @@ type Row = {
   };
 };
 
-type SortKey = "buildingName" | "buildingUniqueCode" | "coordinates" | "riskIndex" | "riskDescription";
+type SortKey = "buildingName" | "buildingUniqueCode" | "riskIndex" | "riskDescription";
 
 function tsToMillis(ts: any): number {
-  // Firestore Timestamp usually has .seconds/.nanoseconds or .toMillis()
   if (!ts) return 0;
   if (typeof ts?.toMillis === "function") return ts.toMillis();
   if (typeof ts?.seconds === "number") return ts.seconds * 1000;
@@ -63,16 +56,12 @@ export default function SummaryPage() {
     setErr(null);
 
     try {
-      // IMPORTANT: your questionnaire saves into "questionnaires" collection.
-      // Also: no orderBy here -> no composite index needed.
       const qy = query(collection(db, "questionnaires"), where("uid", "==", user.uid));
       const snap = await getDocs(qy);
 
       const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Row[];
 
-      // Sort newest first locally (no Firestore index needed)
       data.sort((a, b) => tsToMillis(b.createdAt) - tsToMillis(a.createdAt));
-
       setRows(data);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load questionnaires.");
@@ -101,10 +90,6 @@ export default function SummaryPage() {
     const getComparable = (r: Row): string | number => {
       const name = (r.meta?.buildingName ?? "").toLowerCase();
       const code = (r.meta?.buildingUniqueCode ?? "").toLowerCase();
-      const lat = r.meta?.coordinatesLat ?? null;
-      const lng = r.meta?.coordinatesLng ?? null;
-      const coordStr = `${lat ?? ""},${lng ?? ""}`.toLowerCase();
-
       const score = typeof r.prediction?.score === "number" ? r.prediction.score : -1;
       const riskDesc = (r.prediction?.reasons?.join("; ") ?? "").toLowerCase();
       const risk = (r.prediction?.risk ?? "").toLowerCase();
@@ -114,8 +99,6 @@ export default function SummaryPage() {
           return name;
         case "buildingUniqueCode":
           return code;
-        case "coordinates":
-          return coordStr;
         case "riskIndex":
           return score;
         case "riskDescription":
@@ -154,21 +137,28 @@ export default function SummaryPage() {
 
       <div className="rounded-2xl border border-white/10 bg-white/5">
         <div className="overflow-x-auto">
-          <table className="min-w-[1100px] w-full border-collapse">
+          {/* ✅ fixed column widths so they don't spread too far */}
+          <table className="w-full table-fixed border-collapse">
+            <colgroup>
+              <col className="w-[240px]" />
+              <col className="w-[220px]" />
+              <col className="w-[140px]" />
+              <col className="w-auto" />
+            </colgroup>
+
             <thead className="border-b border-white/10">
               <tr className="text-left text-xs font-semibold text-white/70">
-                <Th label="Building Name" active={sortKey === "buildingName"} dir={sortDir} onClick={() => toggleSort("buildingName")} />
+                <Th
+                  label="Building Name"
+                  active={sortKey === "buildingName"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("buildingName")}
+                />
                 <Th
                   label="Building Unique Code"
                   active={sortKey === "buildingUniqueCode"}
                   dir={sortDir}
                   onClick={() => toggleSort("buildingUniqueCode")}
-                />
-                <Th
-                  label="Coordinates"
-                  active={sortKey === "coordinates"}
-                  dir={sortDir}
-                  onClick={() => toggleSort("coordinates")}
                 />
                 <Th
                   label="Risk Index"
@@ -189,13 +179,13 @@ export default function SummaryPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-4 text-sm text-white/70" colSpan={5}>
+                  <td className="px-4 py-4 text-sm text-white/70" colSpan={4}>
                     Loading…
                   </td>
                 </tr>
               ) : sorted.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-4 text-sm text-white/70" colSpan={5}>
+                  <td className="px-4 py-4 text-sm text-white/70" colSpan={4}>
                     No entries yet. Add one in Questionnaire.
                   </td>
                 </tr>
@@ -203,11 +193,6 @@ export default function SummaryPage() {
                 sorted.map((r) => {
                   const name = r.meta?.buildingName ?? "—";
                   const code = r.meta?.buildingUniqueCode ?? "—";
-
-                  const lat = r.meta?.coordinatesLat;
-                  const lng = r.meta?.coordinatesLng;
-                  const coords =
-                    typeof lat === "number" && typeof lng === "number" ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : "—";
 
                   const score = typeof r.prediction?.score === "number" ? r.prediction.score : null;
                   const riskIndex = score === null ? "—" : score.toFixed(3);
@@ -223,10 +208,9 @@ export default function SummaryPage() {
                       onClick={() => setSelected(r)}
                       className="cursor-pointer border-b border-white/5 text-sm text-white/85 hover:bg-white/[0.06]"
                     >
-                      <td className="px-4 py-3">{name}</td>
-                      <td className="px-4 py-3 text-white/75">{code}</td>
-                      <td className="px-4 py-3 text-white/75">{coords}</td>
-                      <td className="px-4 py-3 text-right font-semibold">{riskIndex}</td>
+                      <td className="px-4 py-3 truncate">{name}</td>
+                      <td className="px-4 py-3 truncate text-white/75">{code}</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{riskIndex}</td>
                       <td className="px-4 py-3 text-white/75">{desc}</td>
                     </tr>
                   );

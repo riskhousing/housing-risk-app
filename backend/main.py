@@ -1,16 +1,15 @@
 # backend/main.py
-# Local FastAPI that matches your src/lib/api.ts PredictRequest/PredictResponse
-
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import Literal, List
+from pydantic import BaseModel, ConfigDict
+from typing import List, Literal, Dict, Any, Optional
 import pandas as pd
 import joblib
 import os
 
-MODEL_PATH = os.getenv("MODEL_PATH", "model.joblib")
-MODEL_VERSION = os.getenv("MODEL_VERSION", "local-v1")
+MODEL_PATH = os.getenv("MODEL_PATH", "questionnaire_model.joblib")
+SCHEMA_PATH = os.getenv("SCHEMA_PATH", "questionnaire_schema.joblib")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "local-v3-questionnaire")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
 app = FastAPI(title="Housing Risk API", version=MODEL_VERSION)
@@ -23,28 +22,158 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = joblib.load(MODEL_PATH)
+# -------------------------------------------------------------------
+# Load model + schema
+# -------------------------------------------------------------------
+try:
+    model = joblib.load(MODEL_PATH)
+except Exception as e:
+    raise RuntimeError(f"Failed to load model at {MODEL_PATH}: {e}")
 
+FEATURE_ORDER: Optional[List[str]] = None
+if os.path.exists(SCHEMA_PATH):
+    try:
+        schema = joblib.load(SCHEMA_PATH)
+        feats = schema.get("features", None)
+        if isinstance(feats, list) and feats:
+            FEATURE_ORDER = list(feats)
+    except Exception:
+        FEATURE_ORDER = None
+
+# Fallback feature list if schema not found (must match training)
+ALL_KEYS = [
+    # A
+    "A1_1_PEIS",
+    "A1_2_FAULT_DISTANCE",
+    "A1_3_SEISMIC_SOURCE_TYPE",
+    "A1_4_LIQUEFACTION",
+    "A2_1_BASIC_WIND_SPEED",
+    "A2_2_BUILDING_VICINITY",
+    "A3_1_SLOPE",
+    "A3_2_ELEVATION",
+    "A3_3_DISTANCE_TO_RIVERS_AND_SEAS",
+    "A3_4_SURFACE_RUNOFF",
+    "A3_5_BASE_HEIGHT",
+    "A3_6_DRAINAGE_SYSTEM",
+    # B
+    "B1_1_AESTHETIC_THEME",
+    "B1_2_STYLE_UNIQUE",
+    "B1_3_STYLE_TYPICAL",
+    "B1_4_CITYSCAPE_INTEGRATION",
+    "B2_1_AGE_OF_BUILDING",
+    "B2_2_PAST_RELEVANCE",
+    "B2_3_GEO_IMPACT",
+    "B2_4_CULTURAL_HERITAGE_TIE",
+    "B2_5_MESSAGE_WORTH_PRESERVING",
+    "B3_1_NO_INITIATIVES",
+    "B3_2_PROMINENT_SUPPORT",
+    "B3_3_IMPORTANCE_DAILY_LIFE",
+    "B3_4_NO_PROMOTION",
+    "B4_1_TOURIST_MUST_SEE",
+    "B4_2_TOURISM_CONTRIBUTION",
+    "B4_3_VISITED_FOR_GOODS",
+    "B4_4_CURRENT_USE_ADOPTS_NEEDS",
+    # C
+    "C1_1_CODE_YEAR_BUILT",
+    "C1_2_PLAN_IRREGULARITY",
+    "C1_3_VERTICAL_IRREGULARITY",
+    "C1_4_BUILDING_PROXIMITY",
+    "C1_5_NUMBER_OF_STOREYS",
+    "C1_6_STRUCT_SYSTEM_MATERIAL",
+    "C1_7_NUMBER_OF_BAYS",
+    "C1_8_COLUMN_SPACING",
+    "C1_9_BUILDING_ENCLOSURE",
+    "C1_10_WALL_MATERIAL",
+    "C1_11_FRAMING_TYPE",
+    "C1_12_FLOORING_MATERIAL",
+    "C2_1_CRACK_WIDTH",
+    "C2_2_UNEVEN_SETTLEMENT",
+    "C2_3_BEAM_COLUMN_DEFORMATION",
+    "C2_4_FINISHING_DETERIORATION",
+    "C2_5_MEMBER_DECAY",
+    "C2_6_ADDITIONAL_LOADS",
+    "C3_1_ROOF_DESIGN",
+    "C3_2_ROOF_SLOPE",
+    "C3_3_ROOFING_MATERIAL",
+    "C4_1_ROOF_FASTENERS",
+    "C4_2_FASTENER_SPACING",
+]
+
+if FEATURE_ORDER is None:
+    FEATURE_ORDER = ALL_KEYS
+
+# -------------------------------------------------------------------
+# Weights (for optional computed score/explanations, not required by model)
+# -------------------------------------------------------------------
+WEIGHTS: Dict[str, int] = {
+    # A
+    "A1_1_PEIS": 3,
+    "A1_2_FAULT_DISTANCE": 3,
+    "A1_3_SEISMIC_SOURCE_TYPE": 3,
+    "A1_4_LIQUEFACTION": 3,
+    "A2_1_BASIC_WIND_SPEED": 2,
+    "A2_2_BUILDING_VICINITY": 2,
+    "A3_1_SLOPE": 1,
+    "A3_2_ELEVATION": 1,
+    "A3_3_DISTANCE_TO_RIVERS_AND_SEAS": 3,
+    "A3_4_SURFACE_RUNOFF": 1,
+    "A3_5_BASE_HEIGHT": 1,
+    "A3_6_DRAINAGE_SYSTEM": 2,
+    # B
+    "B1_1_AESTHETIC_THEME": 2,
+    "B1_2_STYLE_UNIQUE": 1,
+    "B1_3_STYLE_TYPICAL": 1,
+    "B1_4_CITYSCAPE_INTEGRATION": 2,
+    "B2_1_AGE_OF_BUILDING": 2,
+    "B2_2_PAST_RELEVANCE": 3,
+    "B2_3_GEO_IMPACT": 1,
+    "B2_4_CULTURAL_HERITAGE_TIE": 2,
+    "B2_5_MESSAGE_WORTH_PRESERVING": 2,
+    "B3_1_NO_INITIATIVES": 3,
+    "B3_2_PROMINENT_SUPPORT": 3,
+    "B3_3_IMPORTANCE_DAILY_LIFE": 2,
+    "B3_4_NO_PROMOTION": 3,
+    "B4_1_TOURIST_MUST_SEE": 2,
+    "B4_2_TOURISM_CONTRIBUTION": 1,
+    "B4_3_VISITED_FOR_GOODS": 1,
+    "B4_4_CURRENT_USE_ADOPTS_NEEDS": 2,
+    # C
+    "C1_1_CODE_YEAR_BUILT": 3,
+    "C1_2_PLAN_IRREGULARITY": 3,
+    "C1_3_VERTICAL_IRREGULARITY": 2,
+    "C1_4_BUILDING_PROXIMITY": 1,
+    "C1_5_NUMBER_OF_STOREYS": 2,
+    "C1_6_STRUCT_SYSTEM_MATERIAL": 1,
+    "C1_7_NUMBER_OF_BAYS": 3,
+    "C1_8_COLUMN_SPACING": 1,
+    "C1_9_BUILDING_ENCLOSURE": 3,
+    "C1_10_WALL_MATERIAL": 3,
+    "C1_11_FRAMING_TYPE": 3,
+    "C1_12_FLOORING_MATERIAL": 1,
+    "C2_1_CRACK_WIDTH": 2,
+    "C2_2_UNEVEN_SETTLEMENT": 1,
+    "C2_3_BEAM_COLUMN_DEFORMATION": 3,
+    "C2_4_FINISHING_DETERIORATION": 3,
+    "C2_5_MEMBER_DECAY": 3,
+    "C2_6_ADDITIONAL_LOADS": 1,
+    "C3_1_ROOF_DESIGN": 3,
+    "C3_2_ROOF_SLOPE": 3,
+    "C3_3_ROOFING_MATERIAL": 2,
+    "C4_1_ROOF_FASTENERS": 2,
+    "C4_2_FASTENER_SPACING": 2,
+}
+
+A_KEYS = [k for k in FEATURE_ORDER if k.startswith("A")]
+B_KEYS = [k for k in FEATURE_ORDER if k.startswith("B")]
+C_KEYS = [k for k in FEATURE_ORDER if k.startswith("C")]
+
+# -------------------------------------------------------------------
+# Pydantic models
+# -------------------------------------------------------------------
 class PredictRequest(BaseModel):
-    fault_distance_km: float = Field(..., ge=0)
-    basic_wind_speed_mps: float = Field(..., ge=0)
-    slope_deg: float = Field(..., ge=0)
-    elevation_m: float = Field(..., ge=0)
+    # allow extra keys; we only read FEATURE_ORDER keys
+    model_config = ConfigDict(extra="allow")
 
-    potential_liquefaction: bool
-    distance_to_rivers_and_seas_km: float = Field(..., ge=0)
-    surface_runoff: Literal["low", "medium", "high"]
-
-    vertical_irregularity: bool
-    building_proximity_m: float = Field(..., ge=0)
-
-    number_of_bays: float = Field(..., ge=0)
-    column_spacing_m: float = Field(..., gt=0)
-    maximum_crack_mm: float = Field(..., ge=0)
-
-    roof_slope_deg: float = Field(..., ge=0)
-    roof_design: Literal["gable", "hip", "flat", "other"]
-    roof_fastener_distance_cm: float = Field(..., ge=0)
 
 class PredictResponse(BaseModel):
     score: float
@@ -52,116 +181,133 @@ class PredictResponse(BaseModel):
     reasons: List[str]
     model_version: str
 
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_version": MODEL_VERSION}
+    return {"status": "ok", "model_version": MODEL_VERSION, "features": len(FEATURE_ORDER)}
 
-def build_reasons(req: PredictRequest) -> List[str]:
-    reasons: List[str] = []
-    if req.fault_distance_km < 5:
-        reasons.append("Very near fault line (<5 km).")
-    if req.distance_to_rivers_and_seas_km < 1:
-        reasons.append("Very close to rivers/seas (<1 km).")
-    if req.elevation_m < 10:
-        reasons.append("Low elevation (<10 m).")
-    if req.potential_liquefaction:
-        reasons.append("Potential liquefaction flagged.")
-    if req.surface_runoff == "high":
-        reasons.append("High surface runoff.")
-    if req.maximum_crack_mm >= 5:
-        reasons.append("Large cracks (>=5 mm).")
-    if req.vertical_irregularity:
-        reasons.append("Vertical irregularity flagged.")
-    return reasons[:6]
 
-def clamp01(x: float) -> float:
-    return 0.0 if x < 0 else 1.0 if x > 1 else x
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
+def _get_int123(payload: Dict[str, Any], key: str) -> int:
+    if key not in payload:
+        raise HTTPException(status_code=422, detail=f"Missing field: {key}")
+    try:
+        v = int(payload[key])
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"Invalid value for {key}. Must be 1/2/3.")
+    if v not in (1, 2, 3):
+        raise HTTPException(status_code=422, detail=f"Invalid value for {key}. Must be 1/2/3.")
+    return v
 
-def heuristic_score(req: PredictRequest) -> float:
-    s = 0.0
-    if req.fault_distance_km < 5: s += 0.22
-    elif req.fault_distance_km < 15: s += 0.12
 
-    if req.distance_to_rivers_and_seas_km < 1: s += 0.16
-    elif req.distance_to_rivers_and_seas_km < 5: s += 0.08
+def calc_risk_index_like_sheet(payload: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Approx of your COMPUTATION sheet idea:
+      - group ratings are weighted averages ~1..3
+      - risk_rating = hazard * exposure * vulnerability (~1..27)
+      - risk_index = (risk_rating/27)*10 (~0..10)
+    """
+    def wavg(keys: List[str]) -> float:
+        w_sum = 0.0
+        x_sum = 0.0
+        for k in keys:
+            w = float(WEIGHTS.get(k, 1))
+            x = float(_get_int123(payload, k))
+            w_sum += w
+            x_sum += x * w
+        return (x_sum / w_sum) if w_sum > 0 else 0.0
 
-    if req.elevation_m < 10: s += 0.14
-    elif req.elevation_m < 30: s += 0.06
+    hazard = wavg(A_KEYS)
+    exposure = wavg(B_KEYS)
+    vuln = wavg(C_KEYS)
 
-    if req.potential_liquefaction: s += 0.20
+    risk_rating = hazard * exposure * vuln
+    risk_index = (risk_rating / 27.0) * 10.0
 
-    if req.surface_runoff == "high": s += 0.08
-    elif req.surface_runoff == "medium": s += 0.04
-
-    if req.basic_wind_speed_mps >= 40: s += 0.07
-    if req.maximum_crack_mm >= 5: s += 0.10
-    elif req.maximum_crack_mm >= 2: s += 0.05
-
-    if req.vertical_irregularity: s += 0.06
-    if req.roof_fastener_distance_cm >= 25: s += 0.05
-    elif req.roof_fastener_distance_cm >= 18: s += 0.03
-    return clamp01(s)
-
-def to_model_df(req: PredictRequest) -> pd.DataFrame:
-    # Map your API payload into the sklearn training columns
-    # Liquefaction: bool -> string label used by training pipeline
-    liquefaction = "high" if req.potential_liquefaction else "low"
-    vertical_irreg = 1.0 if req.vertical_irregularity else 0.0
-
-    row = {
-        "FAULT_DISTANCE": float(req.fault_distance_km),
-        "BASIC_WIND_SPEED": float(req.basic_wind_speed_mps),
-        "SLOPE": float(req.slope_deg),
-        "ELEVATION": float(req.elevation_m),
-
-        "POTENTIAL_LIQUEFACTION": liquefaction,
-        "DISTANCE_TO_RIVERS_AND_SEAS": float(req.distance_to_rivers_and_seas_km),
-        "SURFACE_RUN_OFF": str(req.surface_runoff),
-
-        "VERTICAL_IRREGUARITY": float(vertical_irreg),
-        "BUILDING_PROXIMITY": float(req.building_proximity_m),
-        "NUMBER_OF_BAYS": float(req.number_of_bays),
-        "COLUMN_SPACING": float(req.column_spacing_m),
-        "MAXIMUM_CRACK": float(req.maximum_crack_mm),
-
-        "ROOF_SLOPE": float(req.roof_slope_deg),
-        "ROOF_DESIGN": str(req.roof_design),
-        "ROOF_FASTENER_DISTANCE": float(req.roof_fastener_distance_cm),
+    return {
+        "HAZARD_RATING": float(hazard),
+        "EXPOSURE_RATING": float(exposure),
+        "VULNERABILITY_RATING": float(vuln),
+        "RISK_RATING": float(risk_rating),
+        "RISK_INDEX": float(risk_index),
     }
-    return pd.DataFrame([row])
 
+
+def to_model_df(payload: Dict[str, Any]) -> pd.DataFrame:
+    row: Dict[str, float] = {}
+    for k in FEATURE_ORDER:
+        row[k] = float(_get_int123(payload, k))
+    return pd.DataFrame([row], columns=FEATURE_ORDER)
+
+
+def build_reasons(payload: Dict[str, Any]) -> List[str]:
+    r: List[str] = []
+
+    # Example "top drivers": any answers scored 3
+    if payload.get("A1_2_FAULT_DISTANCE") == 3:
+        r.append("High hazard: near a fault line (A1.2 = 3).")
+    if payload.get("A1_4_LIQUEFACTION") == 3:
+        r.append("High hazard: liquefaction potential (A1.4 = 3).")
+    if payload.get("A3_3_DISTANCE_TO_RIVERS_AND_SEAS") == 3:
+        r.append("High flood exposure: close to rivers/seas (A3.3 = 3).")
+    if payload.get("C1_2_PLAN_IRREGULARITY") == 3:
+        r.append("High vulnerability: plan irregularity (C1.2 = 3).")
+    if payload.get("C1_3_VERTICAL_IRREGULARITY") == 3:
+        r.append("High vulnerability: vertical irregularity (C1.3 = 3).")
+    if payload.get("C4_2_FASTENER_SPACING") == 3:
+        r.append("High vulnerability: roof fastener spacing (C4.2 = 3).")
+
+    # Append computed index (informational)
+    scores = calc_risk_index_like_sheet(payload)
+    r.append(f"Computed Risk Index (0–10): {scores['RISK_INDEX']:.2f}")
+
+    return r[:6]
+
+
+# -------------------------------------------------------------------
+# Predict endpoint
+# -------------------------------------------------------------------
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    X = to_model_df(req)
+    payload = req.model_dump()
 
-    # model prediction label
+    # Build model input strictly from feature order
+    X = to_model_df(payload)
+
+    # Predict class
     pred = str(model.predict(X)[0]).upper()
+
+    # Normalize common variants
+    if pred == "MODERATE":
+        pred = "MEDIUM"
     if pred not in {"LOW", "MEDIUM", "HIGH"}:
-        # if your model returns something else, normalize:
         pred = "MEDIUM"
 
-    # score: try model proba; else heuristic
+    # Score: probability of predicted class (if available)
     score = None
     try:
         if hasattr(model, "predict_proba"):
             proba = model.predict_proba(X)[0]
+            classes = []
             if hasattr(model, "classes_"):
-                classes = [str(c).upper() for c in model.classes_]
-                if "HIGH" in classes:
-                    score = float(proba[classes.index("HIGH")])
-                else:
-                    score = float(max(proba))
+                classes = [str(c).upper().replace("MODERATE", "MEDIUM") for c in model.classes_]
+            if classes and pred in classes:
+                score = float(proba[classes.index(pred)])
             else:
                 score = float(max(proba))
     except Exception:
         score = None
 
     if score is None:
-        score = float(heuristic_score(req))
+        # fallback: map computed index to 0..1
+        idx = calc_risk_index_like_sheet(payload)["RISK_INDEX"]
+        score = max(0.0, min(1.0, idx / 10.0))
 
     return PredictResponse(
         score=round(float(score), 4),
         risk=pred,  # LOW/MEDIUM/HIGH
-        reasons=build_reasons(req),
-        model_version=MODEL_VERSION
+        reasons=build_reasons(payload),
+        model_version=MODEL_VERSION,
     )

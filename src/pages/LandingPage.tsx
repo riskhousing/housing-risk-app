@@ -40,9 +40,6 @@ export default function LandingPage() {
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold text-white">RIDHAH PH</div>
-              <div className="text-xs text-white/60">
-                Risk Index & Decision Support
-              </div>
             </div>
           </div>
 
