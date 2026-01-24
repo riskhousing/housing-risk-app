@@ -29,6 +29,20 @@ function isEmailPasswordUser(u: User) {
   return u.providerData.some((p) => p.providerId === "password");
 }
 
+// ✅ Wake Render backend after login so it doesn't cold-start on /predict
+async function warmBackend() {
+  const base = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (!base) return;
+
+  const url = `${base.replace(/\/$/, "")}/health`;
+
+  try {
+    await fetch(url, { cache: "no-store" });
+  } catch {
+    // ignore – server may still be waking up
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginWithGoogle: async () => {
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
+
+        // fire-and-forget warmup
+        void warmBackend();
       },
 
       loginWithEmailPassword: async (email, password) => {
@@ -64,6 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw err;
           }
         }
+
+        // ✅ only warm backend after we know login is allowed
+        void warmBackend();
       },
 
       signupWithEmailPassword: async (email, password) => {
